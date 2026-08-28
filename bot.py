@@ -8,13 +8,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# DeepSeek uses an OpenAI-compatible API format
-# You can override the base URL to point to DeepSeek's API
-deepseek_client = AsyncOpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com" # Update if DeepSeek API URL is different
+# Using Groq API (which is free and compatible with OpenAI client)
+ai_client = AsyncOpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1"
 )
 
 class TicketBot(commands.Bot):
@@ -77,11 +76,11 @@ async def on_message(message: discord.Message):
         # We can add an indicator that the bot is thinking
         async with message.channel.typing():
             try:
-                # Query DeepSeek API
-                response = await deepseek_client.chat.completions.create(
-                    model="deepseek-chat", # Check correct model name in DeepSeek docs
+                # Query Groq API
+                response = await ai_client.chat.completions.create(
+                    model="llama-3.1-70b-versatile", # Free and very smart model
                     messages=[
-                        {"role": "system", "content": "You are a helpful support assistant resolving user issues in a Discord ticket."},
+                        {"role": "system", "content": "You are a helpful support assistant resolving user issues in a Discord ticket. Answer in the same language the user speaks (e.g. Russian)."},
                         {"role": "user", "content": message.content}
                     ],
                     max_tokens=1000
