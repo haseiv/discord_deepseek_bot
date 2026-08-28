@@ -208,7 +208,7 @@ async def on_message(message: discord.Message):
     if message.channel.name.startswith("ticket-"):
         async with message.channel.typing():
             try:
-                model_name = os.getenv("GROQ_MODEL", "llama-4-scout-17b-16e-instruct")
+                model_name = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
                 response = await ai_client.chat.completions.create(
                     model=model_name,
                     messages=[
