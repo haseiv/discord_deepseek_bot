@@ -208,8 +208,9 @@ async def on_message(message: discord.Message):
     if message.channel.name.startswith("ticket-"):
         async with message.channel.typing():
             try:
+                model_name = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
                 response = await ai_client.chat.completions.create(
-                    model="llama3-70b-8192",
+                    model=model_name,
                     messages=[
                         {"role": "system", "content": "You are a helpful support assistant resolving user issues in a Discord ticket. Answer in the same language the user speaks (e.g. Russian)."},
                         {"role": "user", "content": message.content}
