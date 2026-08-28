@@ -1,5 +1,6 @@
 import os
 import json
+import datetime
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -37,7 +38,7 @@ class TicketControlView(discord.ui.View):
     @discord.ui.button(label="Закрыть тикет", style=discord.ButtonStyle.red, custom_id="ticket_control:close", emoji="🔒")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("Тикет будет закрыт через 5 секунд...", ephemeral=True)
-        await discord.utils.sleep_until(discord.utils.utcnow() + discord.utils.timedelta(seconds=5))
+        await discord.utils.sleep_until(discord.utils.utcnow() + datetime.timedelta(seconds=5))
         try:
             await interaction.channel.delete()
         except Exception as e:
@@ -232,9 +233,9 @@ async def on_message(message: discord.Message):
                 )
                 
                 reply = response.choices[0].message.content
-                await message.channel.send(reply)
+                await message.channel.send(reply, allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:
-                await message.channel.send(f"An error occurred while contacting AI: {str(e)}")
+                await message.channel.send(f"An error occurred while contacting AI: {str(e)}", allowed_mentions=discord.AllowedMentions.none())
                 
     await bot.process_commands(message)
 
