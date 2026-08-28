@@ -186,7 +186,7 @@ async def on_message(message: discord.Message):
         async with message.channel.typing():
             try:
                 response = await ai_client.chat.completions.create(
-                    model="llama-3.1-70b-versatile",
+                    model="llama3-70b-8192",
                     messages=[
                         {"role": "system", "content": "You are a helpful support assistant resolving user issues in a Discord ticket. Answer in the same language the user speaks (e.g. Russian)."},
                         {"role": "user", "content": message.content}
