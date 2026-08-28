@@ -217,19 +217,27 @@ async def on_message(message: discord.Message):
                 messages_history = [msg async for msg in message.channel.history(limit=10)]
                 messages_history.reverse() # Старые сначала, новые в конце
                 
-                api_messages = [
-                    {"role": "system", "content": "You are a human-like Discord support assistant. Speak naturally in Russian. If the user states a problem, ask clarifying questions (e.g. 'What game?'). React directly to what the user just said."}
-                ]
-                
-                for msg in messages_history:
+                history_text = "История чата:\n"
+                for msg in messages_history[:-1]:
                     if "An error occurred while contacting AI" in msg.content or "ваш тикет создан" in msg.content.lower():
                         continue
+                    clean_content = msg.clean_content.replace("@", "").strip()
+                    if clean_content:
+                        speaker = "Бот" if msg.author == bot.user else "Пользователь"
+                        history_text += f"{speaker}: {clean_content}\n"
                         
-                    clean_content = msg.clean_content.replace("@", "")
-                    role = "assistant" if msg.author == bot.user else "user"
-                    
-                    if clean_content.strip():
-                        api_messages.append({"role": role, "content": clean_content})
+                last_msg = messages_history[-1].clean_content.replace("@", "").strip()
+                
+                system_instruction = (
+                    "Ты профессиональный Discord-бот поддержки. "
+                    "Прочитай историю чата и ответь на ПОСЛЕДНЕЕ сообщение Пользователя. "
+                    "Отвечай на русском. Никаких 'Привет' если ты уже здоровался. "
+                    "Отвечай прямо, коротко и по делу."
+                )
+                
+                final_prompt = f"{system_instruction}\n\n{history_text}\nПользователь сейчас пишет: {last_msg}\nТвой ответ:"
+                
+                api_messages = [{"role": "user", "content": final_prompt}]
 
                 model_name = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
                 response = await ai_client.chat.completions.create(
