@@ -213,7 +213,7 @@ async def on_message(message: discord.Message):
                 messages_history.reverse() # Старые сначала, новые в конце
                 
                 api_messages = [
-                    {"role": "system", "content": "You are a helpful support assistant resolving user issues in a Discord ticket. Answer in the same language the user speaks (e.g. Russian)."}
+                    {"role": "system", "content": "You are a professional Discord support bot. You help users resolve their issues in tickets. ALWAYS answer in Russian. Be concise, helpful, and polite."}
                 ]
                 
                 for msg in messages_history:
@@ -227,7 +227,8 @@ async def on_message(message: discord.Message):
                 response = await ai_client.chat.completions.create(
                     model=model_name,
                     messages=api_messages,
-                    max_tokens=1000
+                    max_tokens=1000,
+                    temperature=0.7
                 )
                 
                 reply = response.choices[0].message.content
