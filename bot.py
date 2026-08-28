@@ -128,10 +128,10 @@ class TicketSelect(discord.ui.Select):
         
         embed = discord.Embed(
             title=f"Тикет: {category_name}",
-            description=f"Привет, {interaction.user.mention}! Опишите вашу проблему, и наш AI-помощник постарается вам помочь.",
+            description=f"Привет! Опишите вашу проблему, и наш AI-помощник постарается вам помочь.",
             color=discord.Color.green()
         )
-        await ticket_channel.send(content=interaction.user.mention, embed=embed, view=TicketControlView())
+        await ticket_channel.send(embed=embed, view=TicketControlView())
 
 class TicketSelectView(discord.ui.View):
     def __init__(self):
@@ -142,7 +142,9 @@ class TicketSelectView(discord.ui.View):
 
 class TicketBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix="!", intents=discord.Intents.default())
+        intents = discord.Intents.default()
+        intents.message_content = True  # ОБЯЗАТЕЛЬНО для чтения текста сообщений
+        super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
         # Add persistent views so they work after bot restarts
@@ -217,40 +219,58 @@ async def on_message(message: discord.Message):
                 messages_history = [msg async for msg in message.channel.history(limit=10)]
                 messages_history.reverse() # Старые сначала, новые в конце
                 
-                history_text = "История чата:\n"
+                history_text = ""
                 for msg in messages_history[:-1]:
-                    if "An error occurred while contacting AI" in msg.content or "ваш тикет создан" in msg.content.lower():
+                    # Берём текст из content или clean_content
+                    text = (msg.clean_content or msg.content or "").replace("@", "").strip()
+                    if not text:
                         continue
-                    clean_content = msg.clean_content.replace("@", "").strip()
-                    if clean_content:
-                        speaker = "Бот" if msg.author == bot.user else "Пользователь"
-                        history_text += f"{speaker}: {clean_content}\n"
+                    if "an error occurred" in text.lower() or "ваш тикет создан" in text.lower():
+                        continue
+                    speaker = "Бот" if msg.author == bot.user else "Пользователь"
+                    history_text += f"{speaker}: {text}\n"
                         
-                last_msg = messages_history[-1].clean_content.replace("@", "").strip()
+                last_msg = (message.clean_content or message.content or "").replace("@", "").strip()
                 
-                system_instruction = (
-                    "Ты профессиональный Discord-бот поддержки. "
-                    "Прочитай историю чата и ответь на ПОСЛЕДНЕЕ сообщение Пользователя. "
-                    "Отвечай на русском. Никаких 'Привет' если ты уже здоровался. "
-                    "Отвечай прямо, коротко и по делу."
+                if not last_msg:
+                    return  # Нечего обрабатывать (пустое сообщение, картинка и т.д.)
+                
+                prompt = (
+                    "Ты — Discord-бот поддержки. Отвечай ТОЛЬКО на русском языке.\n"
+                    "Твоя задача — помочь пользователю с его вопросом.\n"
+                    "Правила:\n"
+                    "- Отвечай коротко (1-3 предложения)\n"
+                    "- Если пользователь описал проблему, задай уточняющий вопрос\n"
+                    "- Если пользователь здоровается, поздоровайся ОДИН раз и спроси чем помочь\n"
+                    "- Если ты уже здоровался в истории, НЕ здоровайся снова\n"
+                    "- Отвечай строго на последнее сообщение пользователя\n\n"
                 )
                 
-                final_prompt = f"{system_instruction}\n\n{history_text}\nПользователь сейчас пишет: {last_msg}\nТвой ответ:"
+                if history_text:
+                    prompt += f"Предыдущие сообщения:\n{history_text}\n"
                 
-                api_messages = [{"role": "user", "content": final_prompt}]
+                prompt += f"Пользователь: {last_msg}\nТы:"
+                
+                api_messages = [{"role": "user", "content": prompt}]
 
                 model_name = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
                 response = await ai_client.chat.completions.create(
                     model=model_name,
                     messages=api_messages,
-                    max_tokens=1000,
-                    temperature=0.3
+                    max_tokens=500,
+                    temperature=0.5
                 )
                 
                 reply = response.choices[0].message.content
-                await message.channel.send(reply, allowed_mentions=discord.AllowedMentions.none())
+                # Последняя линия обороны: вырезаем любые упоминания из ответа
+                import re
+                reply = re.sub(r'<@!?\d+>', '', reply).strip()
+                reply = reply.replace("@", "").strip()
+                
+                if reply:
+                    await message.channel.send(reply, allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:
-                await message.channel.send(f"An error occurred while contacting AI: {str(e)}", allowed_mentions=discord.AllowedMentions.none())
+                await message.channel.send(f"Ошибка ИИ: {str(e)}", allowed_mentions=discord.AllowedMentions.none())
                 
     await bot.process_commands(message)
 
