@@ -1,4 +1,5 @@
 import os
+import json
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -10,17 +11,115 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Using Groq API (which is free and compatible with OpenAI client)
 ai_client = AsyncOpenAI(
     api_key=GROQ_API_KEY,
     base_url="https://api.groq.com/openai/v1"
 )
+
+CONFIG_FILE = "config.json"
+
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        return {"ticket_types": []}
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_config(config):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+
+# ----------------- VIEWS -----------------
+
+class TicketControlView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        
+    @discord.ui.button(label="Закрыть тикет", style=discord.ButtonStyle.red, custom_id="ticket_control:close", emoji="🔒")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Тикет будет закрыт через 5 секунд...", ephemeral=True)
+        await discord.utils.sleep_until(discord.utils.utcnow() + discord.utils.timedelta(seconds=5))
+        try:
+            await interaction.channel.delete()
+        except:
+            pass
+
+class TicketSelect(discord.ui.Select):
+    def __init__(self):
+        config = load_config()
+        types = config.get("ticket_types", [])
+        
+        options = []
+        for t in types:
+            options.append(discord.SelectOption(
+                label=t["label"][:100], 
+                value=t["label"][:100],
+                description=t.get("description", "")[:100],
+                emoji=t.get("emoji")
+            ))
+            
+        if not options:
+            options = [discord.SelectOption(label="Нет доступных категорий", value="none")]
+            
+        super().__init__(
+            custom_id="ticket_panel:select",
+            placeholder="Выберите категорию обращения",
+            min_values=1, 
+            max_values=1, 
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "none":
+            return await interaction.response.send_message("Категории не настроены.", ephemeral=True)
+            
+        category_name = self.values[0]
+        guild = interaction.guild
+        
+        # Checking if user already has a ticket
+        existing_channel = discord.utils.get(guild.channels, name=f"ticket-{interaction.user.name.lower()}")
+        if existing_channel:
+            return await interaction.response.send_message(f"У вас уже есть открытый тикет: {existing_channel.mention}", ephemeral=True)
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+        
+        channel_name = f"ticket-{interaction.user.name}"
+        try:
+            ticket_channel = await guild.create_text_channel(
+                channel_name, 
+                overwrites=overwrites,
+                topic=f"Тикет от {interaction.user} | Категория: {category_name}"
+            )
+        except discord.Forbidden:
+            return await interaction.response.send_message("У бота нет прав на создание каналов.", ephemeral=True)
+        
+        await interaction.response.send_message(f"Ваш тикет успешно создан: {ticket_channel.mention}", ephemeral=True)
+        
+        embed = discord.Embed(
+            title=f"Тикет: {category_name}",
+            description=f"Привет, {interaction.user.mention}! Опишите вашу проблему, и наш AI-помощник постарается вам помочь.",
+            color=discord.Color.green()
+        )
+        await ticket_channel.send(content=interaction.user.mention, embed=embed, view=TicketControlView())
+
+class TicketSelectView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(TicketSelect())
+
+# ----------------- BOT CORE -----------------
 
 class TicketBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=discord.Intents.default())
 
     async def setup_hook(self):
+        # Add persistent views so they work after bot restarts
+        self.add_view(TicketSelectView())
+        self.add_view(TicketControlView())
         await self.tree.sync()
         print(f"Synced slash commands for {self.user}")
 
@@ -31,54 +130,63 @@ async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     print("------")
 
-class TicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        
-    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Closing ticket in 5 seconds...", ephemeral=True)
-        await discord.utils.sleep_until(discord.utils.utcnow() + discord.utils.timedelta(seconds=5))
-        await interaction.channel.delete()
+# ----------------- COMMANDS -----------------
 
-@bot.tree.command(name="ticket", description="Create a new support ticket")
-async def create_ticket(interaction: discord.Interaction, issue: str):
-    guild = interaction.guild
-    # You might want to get the category from env or config
-    # category = discord.utils.get(guild.categories, id=int(os.getenv("TICKET_CATEGORY_ID")))
+@bot.tree.command(name="setup_panel", description="Отправить панель создания тикетов (Embed + Select)")
+@app_commands.checks.has_permissions(administrator=True)
+async def setup_panel(interaction: discord.Interaction, title: str = "Поддержка", description: str = "Выберите нужную категорию в меню ниже, чтобы создать тикет."):
+    embed = discord.Embed(title=title, description=description, color=discord.Color.blurple())
+    view = TicketSelectView()
+    await interaction.channel.send(embed=embed, view=view)
+    await interaction.response.send_message("Панель успешно отправлена!", ephemeral=True)
+
+@bot.tree.command(name="add_ticket_type", description="Добавить новую категорию тикетов в выпадающее меню")
+@app_commands.checks.has_permissions(administrator=True)
+async def add_ticket_type(interaction: discord.Interaction, label: str, description: str = "", emoji: str = ""):
+    config = load_config()
+    types = config.get("ticket_types", [])
     
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-    }
+    # Check if exists
+    for t in types:
+        if t["label"].lower() == label.lower():
+            return await interaction.response.send_message("Такая категория уже существует!", ephemeral=True)
+            
+    new_type = {"label": label, "description": description, "emoji": emoji}
+    types.append(new_type)
+    config["ticket_types"] = types
+    save_config(config)
     
-    channel_name = f"ticket-{interaction.user.name}"
-    ticket_channel = await guild.create_text_channel(
-        channel_name, 
-        overwrites=overwrites,
-        # category=category 
-    )
+    await interaction.response.send_message(f"Категория `{label}` добавлена! Пересоздайте панель через /setup_panel, чтобы изменения вступили в силу.", ephemeral=True)
+
+@bot.tree.command(name="remove_ticket_type", description="Удалить категорию тикетов из выпадающего меню")
+@app_commands.checks.has_permissions(administrator=True)
+async def remove_ticket_type(interaction: discord.Interaction, label: str):
+    config = load_config()
+    types = config.get("ticket_types", [])
     
-    await interaction.response.send_message(f"Ticket created: {ticket_channel.mention}", ephemeral=True)
+    new_types = [t for t in types if t["label"].lower() != label.lower()]
     
-    view = TicketView()
-    await ticket_channel.send(f"Hello {interaction.user.mention}! How can we help you today with: **{issue}**?", view=view)
+    if len(types) == len(new_types):
+        return await interaction.response.send_message("Категория не найдена.", ephemeral=True)
+        
+    config["ticket_types"] = new_types
+    save_config(config)
+    
+    await interaction.response.send_message(f"Категория `{label}` удалена! Пересоздайте панель через /setup_panel, чтобы изменения вступили в силу.", ephemeral=True)
+
+# ----------------- AI LISTENER -----------------
 
 @bot.event
 async def on_message(message: discord.Message):
-    # Ignore messages from the bot itself
     if message.author == bot.user:
         return
         
     # Check if we are in a ticket channel (very basic check)
     if message.channel.name.startswith("ticket-"):
-        # We can add an indicator that the bot is thinking
         async with message.channel.typing():
             try:
-                # Query Groq API
                 response = await ai_client.chat.completions.create(
-                    model="llama-3.1-70b-versatile", # Free and very smart model
+                    model="llama-3.1-70b-versatile",
                     messages=[
                         {"role": "system", "content": "You are a helpful support assistant resolving user issues in a Discord ticket. Answer in the same language the user speaks (e.g. Russian)."},
                         {"role": "user", "content": message.content}
