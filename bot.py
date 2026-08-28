@@ -208,13 +208,25 @@ async def on_message(message: discord.Message):
     if message.channel.name.startswith("ticket-"):
         async with message.channel.typing():
             try:
+                # Получаем историю сообщений (последние 10)
+                messages_history = [msg async for msg in message.channel.history(limit=10)]
+                messages_history.reverse() # Старые сначала, новые в конце
+                
+                api_messages = [
+                    {"role": "system", "content": "You are a helpful support assistant resolving user issues in a Discord ticket. Answer in the same language the user speaks (e.g. Russian)."}
+                ]
+                
+                for msg in messages_history:
+                    # Пропускаем системные сообщения и сообщения с ошибками
+                    if "An error occurred while contacting AI" in msg.content:
+                        continue
+                    role = "assistant" if msg.author == bot.user else "user"
+                    api_messages.append({"role": role, "content": msg.content})
+
                 model_name = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
                 response = await ai_client.chat.completions.create(
                     model=model_name,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful support assistant resolving user issues in a Discord ticket. Answer in the same language the user speaks (e.g. Russian)."},
-                        {"role": "user", "content": message.content}
-                    ],
+                    messages=api_messages,
                     max_tokens=1000
                 )
                 
