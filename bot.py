@@ -214,15 +214,17 @@ async def on_message(message: discord.Message):
                 messages_history.reverse() # Старые сначала, новые в конце
                 
                 api_messages = [
-                    {"role": "system", "content": "You are a professional Discord support bot. You help users resolve their issues in tickets. ALWAYS answer in Russian. Be concise, helpful, and polite."}
+                    {"role": "system", "content": "You are a professional Discord support bot. You help users resolve their issues in tickets. ALWAYS answer in Russian. Be concise, helpful, and polite. NEVER mention or ping users in your response (do not use <@id> or @username)."}
                 ]
                 
                 for msg in messages_history:
-                    # Пропускаем системные сообщения и сообщения с ошибками
                     if "An error occurred while contacting AI" in msg.content:
                         continue
+                        
+                    # Очищаем сообщение от пингов перед отправкой ИИ, чтобы он им не учился
+                    clean_content = msg.clean_content
                     role = "assistant" if msg.author == bot.user else "user"
-                    api_messages.append({"role": role, "content": msg.content})
+                    api_messages.append({"role": role, "content": clean_content})
 
                 model_name = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
                 response = await ai_client.chat.completions.create(
