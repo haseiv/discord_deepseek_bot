@@ -53,8 +53,8 @@ class TicketSelect(discord.ui.Select):
             options.append(discord.SelectOption(
                 label=t["label"][:100], 
                 value=t["label"][:100],
-                description=t.get("description", "")[:100],
-                emoji=t.get("emoji")
+                description=(t.get("description", "")[:100] or None),
+                emoji=(t.get("emoji") or None)
             ))
             
         if not options:
