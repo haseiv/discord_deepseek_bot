@@ -115,9 +115,17 @@ class TicketSelect(discord.ui.Select):
         }
         
         channel_name = f"ticket-{interaction.user.name}"
+        
+        config = load_config()
+        category_id = config.get("ticket_category_id")
+        target_category = None
+        if category_id:
+            target_category = discord.utils.get(guild.categories, id=category_id)
+            
         try:
             ticket_channel = await guild.create_text_channel(
-                channel_name, 
+                channel_name,
+                category=target_category,
                 overwrites=overwrites,
                 topic=f"Тикет от {interaction.user} | Категория: {category_name}"
             )
@@ -204,6 +212,25 @@ async def remove_ticket_type(interaction: discord.Interaction, label: str):
     
     await interaction.response.send_message(f"Категория `{label}` удалена! Пересоздайте панель через /setup_panel, чтобы изменения вступили в силу.", ephemeral=True)
 
+@bot.tree.command(name="set_ticket_category", description="Указать категорию Discord, где будут создаваться новые тикеты")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_ticket_category(interaction: discord.Interaction, category: discord.CategoryChannel):
+    config = load_config()
+    config["ticket_category_id"] = category.id
+    save_config(config)
+    await interaction.response.send_message(f"✅ Тикеты теперь будут создаваться в категории: **{category.name}**", ephemeral=True)
+
+@bot.tree.command(name="toggle_ai", description="Включить или выключить авто-ответы ИИ в тикетах")
+@app_commands.checks.has_permissions(administrator=True)
+async def toggle_ai(interaction: discord.Interaction):
+    config = load_config()
+    current_state = config.get("ai_enabled", True)
+    config["ai_enabled"] = not current_state
+    save_config(config)
+    
+    status = "включены ✅" if not current_state else "отключены ❌"
+    await interaction.response.send_message(f"Авто-ответы ИИ теперь **{status}**.", ephemeral=True)
+
 # ----------------- AI LISTENER -----------------
 
 @bot.event
@@ -215,6 +242,11 @@ async def on_message(message: discord.Message):
     if message.channel.name.startswith("ticket-"):
         async with message.channel.typing():
             try:
+                
+                config = load_config()
+                if not config.get("ai_enabled", True):
+                    return  # ИИ отключен
+
                 # Получаем историю сообщений (последние 10)
                 messages_history = [msg async for msg in message.channel.history(limit=10)]
                 messages_history.reverse() # Старые сначала, новые в конце
@@ -225,7 +257,7 @@ async def on_message(message: discord.Message):
                     text = (msg.clean_content or msg.content or "").replace("@", "").strip()
                     if not text:
                         continue
-                    if "an error occurred" in text.lower() or "ваш тикет создан" in text.lower():
+                    if "an error occurred" in text.lower() or "ваш тикет создан" in text.lower() or "тикет будет закрыт" in text.lower():
                         continue
                     speaker = "Бот" if msg.author == bot.user else "Пользователь"
                     history_text += f"{speaker}: {text}\n"
@@ -243,7 +275,8 @@ async def on_message(message: discord.Message):
                     "- Если пользователь описал проблему, задай уточняющий вопрос\n"
                     "- Если пользователь здоровается, поздоровайся ОДИН раз и спроси чем помочь\n"
                     "- Если ты уже здоровался в истории, НЕ здоровайся снова\n"
-                    "- Отвечай строго на последнее сообщение пользователя\n\n"
+                    "- Отвечай строго на последнее сообщение пользователя\n"
+                    "- ЕСЛИ ПОЛЬЗОВАТЕЛЬ ПРОСИТ ЗАКРЫТЬ ТИКЕТ, напиши ровно одну фразу: [CLOSE_TICKET]\n\n"
                 )
                 
                 if history_text:
@@ -266,6 +299,15 @@ async def on_message(message: discord.Message):
                 import re
                 reply = re.sub(r'<@!?\d+>', '', reply).strip()
                 reply = reply.replace("@", "").strip()
+                
+                if "[CLOSE_TICKET]" in reply.upper() or "CLOSE_TICKET" in reply.upper():
+                    await message.channel.send("Понял вас! Тикет будет закрыт через 5 секунд...", allowed_mentions=discord.AllowedMentions.none())
+                    await asyncio.sleep(5)
+                    try:
+                        await message.channel.delete()
+                    except:
+                        pass
+                    return
                 
                 if reply:
                     await message.channel.send(reply, allowed_mentions=discord.AllowedMentions.none())
