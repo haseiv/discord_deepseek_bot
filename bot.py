@@ -218,18 +218,16 @@ async def on_message(message: discord.Message):
                 messages_history.reverse() # Старые сначала, новые в конце
                 
                 api_messages = [
-                    {"role": "system", "content": "You are a human-like Discord support assistant. Speak naturally in Russian. If the user states a problem (e.g. 'my game crashed'), ask clarifying questions (e.g. 'What game? Any error codes?'). NEVER repeat your previous generic greetings. NEVER use copy-pasted robotic phrases. React directly to what the user just said."}
+                    {"role": "system", "content": "You are a human-like Discord support assistant. Speak naturally in Russian. If the user states a problem, ask clarifying questions (e.g. 'What game?'). React directly to what the user just said."}
                 ]
                 
                 for msg in messages_history:
-                    # Пропускаем ошибки и стартовое сообщение тикета (чтобы ИИ не учился тегать)
                     if "An error occurred while contacting AI" in msg.content or "ваш тикет создан" in msg.content.lower():
                         continue
                         
-                    clean_content = msg.clean_content
+                    clean_content = msg.clean_content.replace("@", "")
                     role = "assistant" if msg.author == bot.user else "user"
                     
-                    # Не добавляем пустые сообщения (например, если там была только картинка)
                     if clean_content.strip():
                         api_messages.append({"role": role, "content": clean_content})
 
