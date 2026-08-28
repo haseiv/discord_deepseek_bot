@@ -40,8 +40,8 @@ class TicketControlView(discord.ui.View):
         await discord.utils.sleep_until(discord.utils.utcnow() + discord.utils.timedelta(seconds=5))
         try:
             await interaction.channel.delete()
-        except:
-            pass
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Ошибка при удалении канала: {e}\n(Проверьте, есть ли у бота права 'Управлять каналами')", ephemeral=True)
 
 class TicketSelect(discord.ui.Select):
     def __init__(self):
