@@ -218,7 +218,7 @@ async def on_message(message: discord.Message):
                 messages_history.reverse() # Старые сначала, новые в конце
                 
                 api_messages = [
-                    {"role": "system", "content": "You are a direct and highly intelligent support assistant. Your primary directive is to PAY ATTENTION to the user's exact words and answer their specific questions directly and accurately. Do NOT go off-topic. Do NOT generate generic robotic greetings if the user is asking a specific question. ALWAYS speak in Russian."}
+                    {"role": "system", "content": "You are a human-like Discord support assistant. Speak naturally in Russian. If the user states a problem (e.g. 'my game crashed'), ask clarifying questions (e.g. 'What game? Any error codes?'). NEVER repeat your previous generic greetings. NEVER use copy-pasted robotic phrases. React directly to what the user just said."}
                 ]
                 
                 for msg in messages_history:
