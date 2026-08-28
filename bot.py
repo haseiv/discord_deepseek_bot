@@ -218,17 +218,20 @@ async def on_message(message: discord.Message):
                 messages_history.reverse() # Старые сначала, новые в конце
                 
                 api_messages = [
-                    {"role": "system", "content": "You are a professional Discord support bot. You help users resolve their issues in tickets. ALWAYS answer in Russian. Be concise, helpful, and polite. NEVER mention or ping users in your response (do not use <@id> or @username)."}
+                    {"role": "system", "content": "You are a professional Discord support bot. You help users resolve their issues in tickets. ALWAYS answer in Russian. Be concise, helpful, and polite."}
                 ]
                 
                 for msg in messages_history:
-                    if "An error occurred while contacting AI" in msg.content:
+                    # Пропускаем ошибки и стартовое сообщение тикета (чтобы ИИ не учился тегать)
+                    if "An error occurred while contacting AI" in msg.content or "ваш тикет создан" in msg.content.lower():
                         continue
                         
-                    # Очищаем сообщение от пингов перед отправкой ИИ, чтобы он им не учился
                     clean_content = msg.clean_content
                     role = "assistant" if msg.author == bot.user else "user"
-                    api_messages.append({"role": role, "content": clean_content})
+                    
+                    # Не добавляем пустые сообщения (например, если там была только картинка)
+                    if clean_content.strip():
+                        api_messages.append({"role": role, "content": clean_content})
 
                 model_name = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
                 response = await ai_client.chat.completions.create(
