@@ -230,7 +230,7 @@ async def on_message(message: discord.Message):
                     role = "assistant" if msg.author == bot.user else "user"
                     api_messages.append({"role": role, "content": clean_content})
 
-                model_name = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+                model_name = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
                 response = await ai_client.chat.completions.create(
                     model=model_name,
                     messages=api_messages,
