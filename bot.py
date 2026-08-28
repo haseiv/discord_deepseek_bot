@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 import datetime
 import discord
 from discord.ext import commands
@@ -38,11 +39,14 @@ class TicketControlView(discord.ui.View):
     @discord.ui.button(label="Закрыть тикет", style=discord.ButtonStyle.red, custom_id="ticket_control:close", emoji="🔒")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("Тикет будет закрыт через 5 секунд...", ephemeral=True)
-        await discord.utils.sleep_until(discord.utils.utcnow() + datetime.timedelta(seconds=5))
+        await asyncio.sleep(5)
         try:
             await interaction.channel.delete()
         except Exception as e:
-            await interaction.followup.send(f"⚠️ Ошибка при удалении канала: {e}\n(Проверьте, есть ли у бота права 'Управлять каналами')", ephemeral=True)
+            try:
+                await interaction.channel.send(f"⚠️ **Ошибка при удалении канала:**\nУ бота нет прав `Управлять каналами` (Manage Channels) на этом сервере или в этой категории.\nТехническая ошибка: `{e}`")
+            except:
+                pass
 
 class TicketSelect(discord.ui.Select):
     def __init__(self):
