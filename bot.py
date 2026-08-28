@@ -50,13 +50,36 @@ class TicketSelect(discord.ui.Select):
         
         options = []
         for t in types:
-            options.append(discord.SelectOption(
-                label=t["label"][:100], 
-                value=t["label"][:100],
-                description=(t.get("description", "")[:100] or None),
-                emoji=(t.get("emoji") or None)
-            ))
-            
+            emoji = t.get("emoji")
+            if isinstance(emoji, str):
+                emoji = emoji.strip()
+                if not emoji or emoji.lower() == "none" or emoji == "null":
+                    emoji = None
+
+            desc = t.get("description", "")
+            if isinstance(desc, str):
+                desc = desc.strip() or None
+
+            # Some users accidentally type text instead of an emoji, which crashes Discord API.
+            # We wrap SelectOption in try/except, but unfortunately discord.py doesn't catch it until send().
+            # So we just pass the sanitized emoji.
+            try:
+                opt = discord.SelectOption(
+                    label=t["label"][:100], 
+                    value=t["label"][:100],
+                    description=desc[:100] if desc else None,
+                    emoji=emoji
+                )
+                options.append(opt)
+            except:
+                opt = discord.SelectOption(
+                    label=t["label"][:100], 
+                    value=t["label"][:100],
+                    description=desc[:100] if desc else None,
+                    emoji=None
+                )
+                options.append(opt)
+                
         if not options:
             options = [discord.SelectOption(label="Нет доступных категорий", value="none")]
             
