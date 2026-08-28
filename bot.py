@@ -218,7 +218,7 @@ async def on_message(message: discord.Message):
                 messages_history.reverse() # Старые сначала, новые в конце
                 
                 api_messages = [
-                    {"role": "system", "content": "You are a professional Discord support bot. You help users resolve their issues in tickets. ALWAYS answer in Russian. Be concise, helpful, and polite."}
+                    {"role": "system", "content": "You are a direct and highly intelligent support assistant. Your primary directive is to PAY ATTENTION to the user's exact words and answer their specific questions directly and accurately. Do NOT go off-topic. Do NOT generate generic robotic greetings if the user is asking a specific question. ALWAYS speak in Russian."}
                 ]
                 
                 for msg in messages_history:
@@ -238,7 +238,7 @@ async def on_message(message: discord.Message):
                     model=model_name,
                     messages=api_messages,
                     max_tokens=1000,
-                    temperature=0.7
+                    temperature=0.3
                 )
                 
                 reply = response.choices[0].message.content
