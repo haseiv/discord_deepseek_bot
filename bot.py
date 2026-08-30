@@ -48,6 +48,26 @@ class TicketControlView(discord.ui.View):
             except:
                 pass
 
+    @discord.ui.button(label="ИИ: Вкл/Выкл", style=discord.ButtonStyle.blurple, custom_id="ticket_control:toggle_ai", emoji="🤖")
+    async def toggle_ai_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Только администраторы могут управлять ИИ.", ephemeral=True)
+            
+        config = load_config()
+        disabled = config.get("disabled_ai_channels", [])
+        
+        if interaction.channel.id in disabled:
+            disabled.remove(interaction.channel.id)
+            msg = "✅ ИИ **ВКЛЮЧЕН** для этого тикета."
+        else:
+            disabled.append(interaction.channel.id)
+            msg = "❌ ИИ **ВЫКЛЮЧЕН** для этого тикета. Бот больше не будет отвечать здесь."
+            
+        config["disabled_ai_channels"] = disabled
+        save_config(config)
+        
+        await interaction.response.send_message(msg, ephemeral=True)
+
 class TicketSelect(discord.ui.Select):
     def __init__(self):
         config = load_config()
@@ -65,9 +85,6 @@ class TicketSelect(discord.ui.Select):
             if isinstance(desc, str):
                 desc = desc.strip() or None
 
-            # Some users accidentally type text instead of an emoji, which crashes Discord API.
-            # We wrap SelectOption in try/except, but unfortunately discord.py doesn't catch it until send().
-            # So we just pass the sanitized emoji.
             try:
                 opt = discord.SelectOption(
                     label=t["label"][:100], 
@@ -100,6 +117,21 @@ class TicketSelect(discord.ui.Select):
         if self.values[0] == "none":
             return await interaction.response.send_message("Категории не настроены.", ephemeral=True)
             
+        config = load_config()
+        
+        # Проверка на кулдаун (5 минут)
+        cooldowns = config.get("cooldowns", {})
+        user_id = str(interaction.user.id)
+        last_time = cooldowns.get(user_id)
+        now = datetime.datetime.utcnow()
+        if last_time:
+            last_dt = datetime.datetime.fromisoformat(last_time)
+            diff = (now - last_dt).total_seconds()
+            if diff < 300:
+                minutes_left = int((300 - diff) // 60)
+                seconds_left = int((300 - diff) % 60)
+                return await interaction.response.send_message(f"⏳ Вы слишком часто создаете тикеты! Подождите {minutes_left} мин. {seconds_left} сек.", ephemeral=True)
+            
         category_name = self.values[0]
         guild = interaction.guild
         
@@ -116,7 +148,6 @@ class TicketSelect(discord.ui.Select):
         
         channel_name = f"ticket-{interaction.user.name}"
         
-        config = load_config()
         category_id = config.get("ticket_category_id")
         target_category = None
         if category_id:
@@ -132,11 +163,30 @@ class TicketSelect(discord.ui.Select):
         except discord.Forbidden:
             return await interaction.response.send_message("У бота нет прав на создание каналов.", ephemeral=True)
         
+        # Обновляем кулдаун и сбрасываем выпадающее меню
+        cooldowns[user_id] = now.isoformat()
+        config["cooldowns"] = cooldowns
+        save_config(config)
+        
+        try:
+            self.values = []
+            for opt in self.options:
+                opt.default = False
+            await interaction.message.edit(view=self.view)
+        except:
+            pass # Если не удалось обновить сообщение
+            
         await interaction.response.send_message(f"Ваш тикет успешно создан: {ticket_channel.mention}", ephemeral=True)
         
+        types = config.get("ticket_types", [])
+        selected_cat = next((t for t in types if t["label"] == category_name), {})
+        
+        embed_title = selected_cat.get("embed_title", f"Тикет: {category_name}")
+        embed_desc = selected_cat.get("embed_desc", f"Привет! Опишите вашу проблему, и наш AI-помощник постарается вам помочь.")
+        
         embed = discord.Embed(
-            title=f"Тикет: {category_name}",
-            description=f"Привет! Опишите вашу проблему, и наш AI-помощник постарается вам помочь.",
+            title=embed_title,
+            description=embed_desc,
             color=discord.Color.green()
         )
         await ticket_channel.send(embed=embed, view=TicketControlView())
@@ -231,6 +281,27 @@ async def toggle_ai(interaction: discord.Interaction):
     status = "включены ✅" if not current_state else "отключены ❌"
     await interaction.response.send_message(f"Авто-ответы ИИ теперь **{status}**.", ephemeral=True)
 
+@bot.tree.command(name="set_ticket_message", description="Настроить приветственный текст внутри тикета для категории")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_ticket_message(interaction: discord.Interaction, label: str, title: str, description: str):
+    config = load_config()
+    types = config.get("ticket_types", [])
+    
+    found = False
+    for t in types:
+        if t["label"].lower() == label.lower():
+            t["embed_title"] = title
+            t["embed_desc"] = description
+            found = True
+            break
+            
+    if not found:
+        return await interaction.response.send_message(f"Категория `{label}` не найдена.", ephemeral=True)
+        
+    config["ticket_types"] = types
+    save_config(config)
+    await interaction.response.send_message(f"✅ Сообщение (embed) для категории `{label}` успешно обновлено!", ephemeral=True)
+
 # ----------------- AI LISTENER -----------------
 
 @bot.event
@@ -245,7 +316,11 @@ async def on_message(message: discord.Message):
                 
                 config = load_config()
                 if not config.get("ai_enabled", True):
-                    return  # ИИ отключен
+                    return  # ИИ отключен глобально
+                
+                disabled_channels = config.get("disabled_ai_channels", [])
+                if message.channel.id in disabled_channels:
+                    return # ИИ отключен администратором в этом конкретном тикете
 
                 # Получаем историю сообщений (последние 10)
                 messages_history = [msg async for msg in message.channel.history(limit=10)]
