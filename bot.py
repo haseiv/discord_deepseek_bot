@@ -68,6 +68,96 @@ class TicketControlView(discord.ui.View):
         
         await interaction.response.send_message(msg, ephemeral=True)
 
+class TicketModal(discord.ui.Modal):
+    def __init__(self, category_name, select_view, select_component, original_message):
+        super().__init__(title=f"Создание тикета: {category_name}"[:45])
+        self.category_name = category_name
+        self.select_view = select_view
+        self.select_component = select_component
+        self.original_message = original_message
+        
+        self.subject = discord.ui.TextInput(
+            label="Тема обращения",
+            style=discord.TextStyle.short,
+            placeholder="Коротко о вашей проблеме...",
+            max_length=100,
+            required=True
+        )
+        self.description = discord.ui.TextInput(
+            label="Детальное описание",
+            style=discord.TextStyle.paragraph,
+            placeholder="Опишите ситуацию максимально подробно...",
+            max_length=2000,
+            required=True
+        )
+        self.add_item(self.subject)
+        self.add_item(self.description)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        category_name = self.category_name
+        
+        # Обновляем кулдаун только после заполнения формы
+        config = load_config()
+        cooldowns = config.get("cooldowns", {})
+        user_id = str(interaction.user.id)
+        cooldowns[user_id] = datetime.datetime.utcnow().isoformat()
+        config["cooldowns"] = cooldowns
+        save_config(config)
+        
+        # Возвращаем меню в исходное состояние
+        try:
+            self.select_component.values = []
+            for opt in self.select_component.options:
+                opt.default = False
+            await self.original_message.edit(view=self.select_view)
+        except:
+            pass
+
+        existing_channel = discord.utils.get(guild.channels, name=f"ticket-{interaction.user.name.lower()}")
+        if existing_channel:
+            return await interaction.response.send_message(f"У вас уже есть открытый тикет: {existing_channel.mention}", ephemeral=True)
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+        
+        channel_name = f"ticket-{interaction.user.name}"
+        category_id = config.get("ticket_category_id")
+        target_category = None
+        if category_id:
+            target_category = discord.utils.get(guild.categories, id=category_id)
+            
+        try:
+            ticket_channel = await guild.create_text_channel(
+                channel_name,
+                category=target_category,
+                overwrites=overwrites,
+                topic=f"Тикет от {interaction.user} | Категория: {category_name}"
+            )
+        except discord.Forbidden:
+            return await interaction.response.send_message("У бота нет прав на создание каналов.", ephemeral=True)
+            
+        await interaction.response.send_message(f"Ваш тикет успешно создан: {ticket_channel.mention}", ephemeral=True)
+        
+        types = config.get("ticket_types", [])
+        selected_cat = next((t for t in types if t["label"] == category_name), {})
+        
+        embed_title = selected_cat.get("embed_title", f"Тикет: {category_name}")
+        embed_desc = selected_cat.get("embed_desc", f"Привет! Опишите вашу проблему, и наш AI-помощник постарается вам помочь.")
+        
+        embed = discord.Embed(
+            title=embed_title,
+            description=embed_desc,
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Тема", value=self.subject.value, inline=False)
+        embed.add_field(name="Описание", value=self.description.value, inline=False)
+        
+        await ticket_channel.send(embed=embed, view=TicketControlView())
+
 class TicketSelect(discord.ui.Select):
     def __init__(self):
         config = load_config()
@@ -133,63 +223,15 @@ class TicketSelect(discord.ui.Select):
                 return await interaction.response.send_message(f"⏳ Вы слишком часто создаете тикеты! Подождите {minutes_left} мин. {seconds_left} сек.", ephemeral=True)
             
         category_name = self.values[0]
-        guild = interaction.guild
         
-        # Checking if user already has a ticket
-        existing_channel = discord.utils.get(guild.channels, name=f"ticket-{interaction.user.name.lower()}")
-        if existing_channel:
-            return await interaction.response.send_message(f"У вас уже есть открытый тикет: {existing_channel.mention}", ephemeral=True)
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
-        }
-        
-        channel_name = f"ticket-{interaction.user.name}"
-        
-        category_id = config.get("ticket_category_id")
-        target_category = None
-        if category_id:
-            target_category = discord.utils.get(guild.categories, id=category_id)
-            
-        try:
-            ticket_channel = await guild.create_text_channel(
-                channel_name,
-                category=target_category,
-                overwrites=overwrites,
-                topic=f"Тикет от {interaction.user} | Категория: {category_name}"
-            )
-        except discord.Forbidden:
-            return await interaction.response.send_message("У бота нет прав на создание каналов.", ephemeral=True)
-        
-        # Обновляем кулдаун и сбрасываем выпадающее меню
-        cooldowns[user_id] = now.isoformat()
-        config["cooldowns"] = cooldowns
-        save_config(config)
-        
-        try:
-            self.values = []
-            for opt in self.options:
-                opt.default = False
-            await interaction.message.edit(view=self.view)
-        except:
-            pass # Если не удалось обновить сообщение
-            
-        await interaction.response.send_message(f"Ваш тикет успешно создан: {ticket_channel.mention}", ephemeral=True)
-        
-        types = config.get("ticket_types", [])
-        selected_cat = next((t for t in types if t["label"] == category_name), {})
-        
-        embed_title = selected_cat.get("embed_title", f"Тикет: {category_name}")
-        embed_desc = selected_cat.get("embed_desc", f"Привет! Опишите вашу проблему, и наш AI-помощник постарается вам помочь.")
-        
-        embed = discord.Embed(
-            title=embed_title,
-            description=embed_desc,
-            color=discord.Color.green()
+        # Открываем модальное окно вместо моментального создания канала
+        modal = TicketModal(
+            category_name=category_name, 
+            select_view=self.view, 
+            select_component=self, 
+            original_message=interaction.message
         )
-        await ticket_channel.send(embed=embed, view=TicketControlView())
+        await interaction.response.send_modal(modal)
 
 class TicketSelectView(discord.ui.View):
     def __init__(self):
